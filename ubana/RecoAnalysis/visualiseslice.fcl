@@ -1,0 +1,25 @@
+BEGIN_PROLOG
+
+visualiseSlice:
+{
+    module_type:                "VisualiseSlice"
+
+    MCParticleModuleLabel:      "largeant"
+    HitModuleLabel:             "gaushit"
+    PandoraModuleLabel:         "pandoraPatRec:allOutcomes"
+    BacktrackModuleLabel:       "gaushitTruthMatch"
+    FlashMatchModuleLabel:      "pandora"
+
+    TrackModuleLabel:           "pandoraAllOutcomesTrack"
+    ShowerModuleLabel:          "pandoraAllOutcomesShower"
+    CalorimetryModuleLabel:     "pandoraCaliAllOutcomes"
+    PIDModuleLabel:             "pandoraPIDAllOutcomes"
+    CalorimetryModuleLabelSCE:  "pandoraCaliAllOutcomesSCE"
+    PIDModuleLabelSCE:          "pandoraPIDAllOutcomesSCE"
+
+    SliceMode:                  2       # 0 == true slice, 1 == pandora slice, 2 == flash match slice
+    Debug:                      true
+    ApplySCECorrections:        true
+}
+
+END_PROLOG
