@@ -85,21 +85,21 @@ public:
   bool IsEM(const art::Ptr<simb::MCParticle> &mcParticle);
   int GetLeadEMTrackID(const art::Ptr<simb::MCParticle> &mcParticle);
   void FillMCSliceInfo(art::Event const& evt);
+  void FillTargetMCInfo(art::Event const& evt);
   void FillNuVertexInfo(art::Event const& evt);
-
   void FillPFPInformation(art::Event const& evt);
-  void FillPFPMatchInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp);
+  void PreparePFPVectors(art::Event const& evt);
+  int GetPFPVectorIndex(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp);
   void CollectHitsFromClusters(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfparticle, 
       std::vector<art::Ptr<recob::Hit>> &hits);
-  void FillPFPVisualisationInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp);
-  void FillPFPHitInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp);
-  void FillNuVertexInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp);
-  void FillPFPMiscInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp);
-  void FillPFPShowerInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp);
-  void FillPFPEnergyInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp);
+  void FillPFPVisualisationInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, const int pfpVectorIndex);
+  void FillPFPHitInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, const int pfpVectorIndex);
+  void FillNuVertexInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, const int pfpVectorIndex);
+  void FillPFPMiscInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, const int pfpVectorIndex);
+  void FillPFPShowerInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, const int pfpVectorIndex);
+  void FillPFPEnergyInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, const int pfpVectorIndex);
   double GetMedianValue(const std::vector<float> &inputVector);
-  void FillPIDInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp);
-  void PadPfoVectors(const unsigned int pfoCount);
+  void FillPIDInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, const int pfpVectorIndex);
 
 private:
 
@@ -128,8 +128,15 @@ private:
     double m_recoNuVertexY;
     double m_recoNuVertexZ;
 
+    // Target MCParticle variables
+    std::vector<int> m_targetMCTrackID;
+    std::vector<int> m_targetMCTrackPDG;
+    std::vector<int> m_targetMCIsPrimary;
+    std::vector<int> m_targetMCNMatches;
+
     // Pfo variables
     std::vector<int> m_truePDG;
+    std::vector<int> m_matchedTrackID;
     std::vector<std::vector<double>> m_spacePointsX;
     std::vector<std::vector<double>> m_spacePointsY;
     std::vector<std::vector<double>> m_spacePointsZ;
@@ -170,7 +177,7 @@ private:
     int m_flashMatchNuSliceID;
 
     std::map<int, int> m_hitToTrackID;
-    std::map<int, std::vector<int>> m_trackIDToHits;
+    std::map<int, std::vector<art::Ptr<recob::Hit>>> m_trackIDToHits;
 
     // Linking TrackID -> MCParticle
     lar_pandora::MCParticleMap m_mcParticleMap;
@@ -264,8 +271,15 @@ void pandora::VisualiseSlice::Reset()
     m_mcParticleMap.clear();
     m_pfpMap.clear();
 
+    // Target MCParticle Variables
+    m_targetMCTrackID.clear();
+    m_targetMCTrackPDG.clear();
+    m_targetMCIsPrimary.clear();
+    m_targetMCNMatches.clear();
+
     // Pfo variables
     m_truePDG.clear();
+    m_matchedTrackID.clear();
 
     m_spacePointsX.clear();
     m_spacePointsY.clear();
@@ -321,7 +335,13 @@ void pandora::VisualiseSlice::InitialiseTrees()
     m_tree->Branch("SliceCompleteness", &m_sliceCompleteness);
     m_tree->Branch("SlicePurity", &m_slicePurity);
 
+    m_tree->Branch("TargetMCTrackID", &m_targetMCTrackID);
+    m_tree->Branch("TargetMCTrackPDG", &m_targetMCTrackPDG);
+    m_tree->Branch("TargetMCIsPrimary", &m_targetMCIsPrimary);
+    m_tree->Branch("TargetMCNMatches", &m_targetMCNMatches);
+
     m_tree->Branch("TruePDG", &m_truePDG);
+    m_tree->Branch("MatchedTrackID", &m_matchedTrackID);
     m_tree->Branch("SpacePointsX", &m_spacePointsX);
     m_tree->Branch("SpacePointsY", &m_spacePointsY);
     m_tree->Branch("SpacePointsZ", &m_spacePointsZ);
@@ -368,6 +388,8 @@ void pandora::VisualiseSlice::analyze(art::Event const& evt)
     FillMCParticleMaps(evt);
     if (m_debug) std::cout << "Filling MC Slice Info..." << std::endl;
     FillMCSliceInfo(evt);
+    if (m_debug) std::cout << "Filling Target MC Info..." << std::endl;
+    FillTargetMCInfo(evt);
     if (m_debug) std::cout << "Filling NuVertex Info..." << std::endl;
     FillNuVertexInfo(evt);
     if (m_debug) std::cout << "Filling PFParticle Information..." << std::endl;
@@ -438,8 +460,7 @@ void pandora::VisualiseSlice::FillMCParticleMaps(art::Event const& evt)
             const int trackID = IsEM(matchedMCParticle) ? GetLeadEMTrackID(matchedMCParticle) : matchedMCParticle->TrackId();
 
             m_hitToTrackID[hit.key()] = trackID;
-            m_trackIDToHits[trackID].push_back(hit.key());
-
+            m_trackIDToHits[trackID].push_back(hit);
         }
     }
 }
@@ -645,6 +666,66 @@ void pandora::VisualiseSlice::FillMCSliceInfo(art::Event const& evt)
         }
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////
+
+void pandora::VisualiseSlice::FillTargetMCInfo(art::Event const& evt)
+{
+    // Get event hits
+    art::Handle<std::vector<recob::Hit>> hitHandle;
+    std::vector<art::Ptr<recob::Hit>> hitVector;
+
+    if (!evt.getByLabel(m_HitModuleLabel, hitHandle))
+        throw cet::exception("VisualiseSlice") << "No Hit Data Products Found!" << std::endl;
+
+    art::fill_ptr_vector(hitVector, hitHandle);
+
+    // Find target MCParticles
+    for (auto &entry : m_trackIDToHits)
+    {
+        const std::vector<art::Ptr<recob::Hit>> &hits = entry.second;
+
+        int uCount(0), vCount(0), wCount(0);
+        for (const art::Ptr<recob::Hit> &hit : hits)
+        {
+            // Get hit view
+            const geo::WireID hit_WireID(hit->WireID());
+            const geo::View_t hit_View(hit->View());
+            const geo::View_t pandoraView(lar_pandora::LArPandoraGeometry::GetGlobalView(hit_WireID.Cryostat, hit_WireID.TPC, hit_View));
+
+            if (pandoraView == geo::kW || pandoraView == geo::kY)
+                ++wCount;
+            else if (pandoraView == geo::kU)
+                ++uCount;
+            else if (pandoraView == geo::kV)
+                ++vCount;
+        }
+
+        std::cout << "hitTotal: " << (uCount + vCount + wCount) << std::endl;
+
+        int planesAboveThreshold(0);
+        for (int planeHitCount : {uCount, vCount, wCount})
+        {
+            if (planeHitCount >= 5)
+                ++planesAboveThreshold;
+        }
+
+        const bool isTarget = (planesAboveThreshold >= 2) && (hits.size() >= 15);
+
+        if (isTarget && (m_mcParticleMap.find(entry.first) != m_mcParticleMap.end()))
+        {
+            m_targetMCTrackID.push_back(entry.first);
+            m_targetMCTrackPDG.push_back(m_mcParticleMap.at(entry.first)->PdgCode());
+            m_targetMCNMatches.push_back(0);
+
+            if (m_mcParticleMap.at(entry.first)->Mother() == 0)
+                m_targetMCIsPrimary.push_back(1);
+            else
+                m_targetMCIsPrimary.push_back(0);
+        }
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 void pandora::VisualiseSlice::FillNuVertexInfo(art::Event const& evt)
@@ -700,6 +781,8 @@ void pandora::VisualiseSlice::FillNuVertexInfo(art::Event const& evt)
 
 void pandora::VisualiseSlice::FillPFPInformation(art::Event const& evt)
 {
+    PreparePFPVectors(evt);
+
     // Get slice information
     art::Handle<std::vector<recob::Slice>> sliceHandle;
     std::vector<art::Ptr<recob::Slice>> sliceVector;
@@ -723,7 +806,6 @@ void pandora::VisualiseSlice::FillPFPInformation(art::Event const& evt)
 
         const std::vector<art::Ptr<recob::PFParticle>> &pfps(pfpAssoc.at(slice.key()));
 
-        unsigned int pfoCount = 0;
         for (const art::Ptr<recob::PFParticle> &pfp : pfps)
         {
             // Skip neutrino...
@@ -736,28 +818,25 @@ void pandora::VisualiseSlice::FillPFPInformation(art::Event const& evt)
             if (!lar_pandora::LArPandoraHelper::IsNeutrino(parentPFP))
                 continue;
 
-            if (m_debug) std::cout << "New PFParticle!" << std::endl;
-            ++pfoCount;
+            const int pfpVectorIndex = GetPFPVectorIndex(evt, pfp);
 
-            if (m_debug) std::cout << "Fill PFP Match Information..." << std::endl;
-            FillPFPMatchInfo(evt, pfp);
+            if (pfpVectorIndex < 0)
+                continue;
+
             if (m_debug) std::cout << "Fill PFP Visualisation Information..." << std::endl;
-            FillPFPVisualisationInfo(evt, pfp);
+            FillPFPVisualisationInfo(evt, pfp, pfpVectorIndex);
             if (m_debug) std::cout << "Fill PFP Hit Information..." << std::endl;
-            FillPFPHitInfo(evt, pfp);
+            FillPFPHitInfo(evt, pfp, pfpVectorIndex);
             if (m_debug) std::cout << "Fill Nu Vertex Information..." << std::endl;
-            FillNuVertexInfo(evt, pfp);
+            FillNuVertexInfo(evt, pfp, pfpVectorIndex);
             if (m_debug) std::cout << "Fill PFP Misc Information..." << std::endl;
-            FillPFPMiscInfo(evt, pfp);
+            FillPFPMiscInfo(evt, pfp, pfpVectorIndex);
             if (m_debug) std::cout << "Fill PFP Shower Information..." << std::endl;
-            FillPFPShowerInfo(evt, pfp);
+            FillPFPShowerInfo(evt, pfp, pfpVectorIndex);
             if (m_debug) std::cout << "Fill PFP Energy Information..." << std::endl;
-            FillPFPEnergyInfo(evt, pfp);
+            FillPFPEnergyInfo(evt, pfp, pfpVectorIndex);
             if (m_debug) std::cout << "Fill PID Information..." << std::endl;
-            FillPIDInfo(evt, pfp);
-
-            if (m_debug) std::cout << "Padding Pfo Vectors..." << std::endl;
-            PadPfoVectors(pfoCount);
+            FillPIDInfo(evt, pfp, pfpVectorIndex);
         }
 
         break;
@@ -766,11 +845,36 @@ void pandora::VisualiseSlice::FillPFPInformation(art::Event const& evt)
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-void pandora::VisualiseSlice::FillPFPMatchInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp)
+void pandora::VisualiseSlice::PreparePFPVectors(art::Event const& evt)
+{
+    std::vector<std::vector<double>*> doubleVectors = {&m_completeness, &m_purity, &m_trackShowerScore, &m_nuVertexSeparation, 
+        &m_dca, &m_trackParentSeparation, &m_showerOpeningAngle, &m_showerLength, &m_totalEnergy, &m_initialdEdx, 
+        &m_chiPIDProton, &m_chiPIDMuon, &m_chiPIDPion, &m_braggPIDProton, &m_braggPIDMuon, &m_braggPIDPion, &m_LLRPIDReduced};
+    std::vector<std::vector<int>*> intVectors = {&m_matchedTrackID, &m_truePDG, &m_generation, &m_pandoraPFPCode, &m_nHits2D, &m_nHits3D, &m_nHitsU, &m_nHitsV, &m_nHitsW};
+    std::vector<std::vector<std::vector<double>>*> spacePointVectors = {&m_spacePointsX, &m_spacePointsY, &m_spacePointsZ};
+
+    for (unsigned int i = 0; i < m_targetMCTrackID.size(); ++i)
+    {
+        for (std::vector<double> *doubleVector : doubleVectors)
+            doubleVector->push_back(DEFAULT_DOUBLE);
+
+        for (std::vector<int> *intVector : intVectors)
+            intVector->push_back(DEFAULT_INT);
+
+        for (std::vector<std::vector<double>> *spacePointVectors : spacePointVectors)
+            spacePointVectors->push_back(std::vector<double>());
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////
+
+int pandora::VisualiseSlice::GetPFPVectorIndex(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp)
 {
     std::vector<art::Ptr<recob::Hit>> pfpHits;
     CollectHitsFromClusters(evt, pfp, pfpHits);
 
+    int maxHits = -1;
+    int matchedTrackID(-1);
     std::map<int, int> countingMap;
     for (const art::Ptr<recob::Hit> pfpHit : pfpHits)
     {
@@ -783,31 +887,41 @@ void pandora::VisualiseSlice::FillPFPMatchInfo(art::Event const& evt, const art:
             countingMap[trackID] = 1;
         else
             ++countingMap[trackID];
-    }
 
-    int maxHits = -1;
-    int matchedTrackID(-1);
-
-    for (auto &entry : countingMap)
-    {
-        if ((entry.second > maxHits) || ((entry.second == maxHits) && (entry.first > matchedTrackID)))
+        if ((countingMap[trackID] > maxHits) || ((countingMap[trackID] == maxHits) && (trackID > matchedTrackID)))
         {
-            maxHits = entry.second;
-            matchedTrackID = entry.first;
+            maxHits = countingMap[trackID];
+            matchedTrackID = trackID;
         }
     }
 
     if (m_mcParticleMap.find(matchedTrackID) == m_mcParticleMap.end())
-        return;
-
-    const art::Ptr<simb::MCParticle> &matchedMCParticle(m_mcParticleMap.at(matchedTrackID)); 
-
-    m_truePDG.push_back(matchedMCParticle->PdgCode());
+        return -1;
 
     const int nTrueHits = m_trackIDToHits.at(matchedTrackID).size();
+    const double completeness = static_cast<double>(maxHits) / static_cast<double>(nTrueHits);
 
-    m_completeness.push_back(static_cast<double>(maxHits) / static_cast<double>(nTrueHits));
-    m_purity.push_back(static_cast<double>(maxHits) / pfpHits.size());
+    for (unsigned int i = 0; i < m_targetMCTrackID.size(); ++i)
+    {
+        if (m_targetMCTrackID.at(i) == matchedTrackID)
+        {
+            m_targetMCNMatches.at(i) += 1;
+
+            // only consider the 'best match'
+            if (completeness > m_completeness.at(i))
+            {
+                m_completeness.at(i) = completeness;
+                m_purity.at(i) = static_cast<double>(maxHits) / pfpHits.size();
+                return i;
+            }
+            else
+            {
+                return -1;
+            }
+        }
+    }
+
+    return -1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -837,10 +951,10 @@ void pandora::VisualiseSlice::CollectHitsFromClusters(art::Event const& evt, con
    }
 }
 
-
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-void pandora::VisualiseSlice::FillPFPVisualisationInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp)
+void pandora::VisualiseSlice::FillPFPVisualisationInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, 
+    const int pfpVectorIndex)
 {
     art::Handle<std::vector<recob::PFParticle>> pfpHandle;
 
@@ -859,14 +973,15 @@ void pandora::VisualiseSlice::FillPFPVisualisationInfo(art::Event const& evt, co
         spacePointsZ.push_back(spacePoint->XYZ()[2]);
     }
 
-    m_spacePointsX.push_back(spacePointsX);
-    m_spacePointsY.push_back(spacePointsY);
-    m_spacePointsZ.push_back(spacePointsZ);
+    m_spacePointsX.at(pfpVectorIndex) = spacePointsX;
+    m_spacePointsY.at(pfpVectorIndex) = spacePointsY;
+    m_spacePointsZ.at(pfpVectorIndex) = spacePointsZ;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-void pandora::VisualiseSlice::FillPFPHitInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp)
+void pandora::VisualiseSlice::FillPFPHitInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, 
+    const int pfpVectorIndex)
 {
     art::Handle<std::vector<recob::PFParticle>> pfpHandle;
 
@@ -876,7 +991,7 @@ void pandora::VisualiseSlice::FillPFPHitInfo(art::Event const& evt, const art::P
     art::FindManyP<recob::SpacePoint> spacePointAssoc = art::FindManyP<recob::SpacePoint>(pfpHandle, evt, m_PandoraModuleLabel);
     const std::vector<art::Ptr<recob::SpacePoint>> &pfpSpacePoints = spacePointAssoc.at(pfp.key());
 
-    m_nHits3D.push_back(pfpSpacePoints.size());
+    m_nHits3D.at(pfpVectorIndex) = pfpSpacePoints.size();
 
     std::vector<art::Ptr<recob::Hit>> pfpHits;
     CollectHitsFromClusters(evt, pfp, pfpHits);
@@ -898,15 +1013,16 @@ void pandora::VisualiseSlice::FillPFPHitInfo(art::Event const& evt, const art::P
             ++vCount;
     }
 
-    m_nHits2D.push_back(pfpHits.size());
-    m_nHitsU.push_back(uCount);
-    m_nHitsV.push_back(vCount);
-    m_nHitsW.push_back(wCount);
+    m_nHits2D.at(pfpVectorIndex) = pfpHits.size();
+    m_nHitsU.at(pfpVectorIndex) = uCount;
+    m_nHitsV.at(pfpVectorIndex) = vCount;
+    m_nHitsW.at(pfpVectorIndex) = wCount;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-void pandora::VisualiseSlice::FillNuVertexInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp)
+void pandora::VisualiseSlice::FillNuVertexInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, 
+    const int pfpVectorIndex)
 {
     ////////////////////////
     // NuVertex Separation
@@ -930,7 +1046,7 @@ void pandora::VisualiseSlice::FillNuVertexInfo(art::Event const& evt, const art:
     const double dY(m_recoNuVertexY - pfpVertex.at(0)->position().Y());
     const double dZ(m_recoNuVertexZ - pfpVertex.at(0)->position().Z());
 
-    m_nuVertexSeparation.push_back(std::sqrt((dX * dX) + (dY * dY) + (dZ * dZ)));
+    m_nuVertexSeparation.at(pfpVectorIndex) = std::sqrt((dX * dX) + (dY * dY) + (dZ * dZ));
 
     ////////////////////////
     // Distance of closest approach
@@ -946,19 +1062,20 @@ void pandora::VisualiseSlice::FillNuVertexInfo(art::Event const& evt, const art:
     const TVector3 nuVertexPosition(m_recoNuVertexX, m_recoNuVertexY, m_recoNuVertexZ);
     const double alpha = std::fabs((shower->ShowerStart() - nuVertexPosition).Dot(shower->Direction()));
     const TVector3 r = shower->ShowerStart() - (alpha * shower->Direction());
-    m_dca.push_back((r - nuVertexPosition).Mag());
+    m_dca.at(pfpVectorIndex) = (r - nuVertexPosition).Mag();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-void pandora::VisualiseSlice::FillPFPMiscInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp)
+void pandora::VisualiseSlice::FillPFPMiscInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, 
+    const int pfpVectorIndex)
 {
     ////////////////////////
     // Generation
     ////////////////////////
     const int generation = lar_pandora::LArPandoraHelper::GetGeneration(m_pfpMap, pfp);
-    m_generation.push_back(generation);
-    m_pandoraPFPCode.push_back(pfp->PdgCode());
+    m_generation.at(pfpVectorIndex) = generation;
+    m_pandoraPFPCode.at(pfpVectorIndex) = pfp->PdgCode();
 
     ////////////////////////
     // TrackShower Score
@@ -972,7 +1089,7 @@ void pandora::VisualiseSlice::FillPFPMiscInfo(art::Event const& evt, const art::
     std::vector<art::Ptr<larpandoraobj::PFParticleMetadata>> pfpMetadata = metadataAssn.at(pfp.key());
 
     if (!pfpMetadata.empty() && (pfpMetadata[0]->GetPropertiesMap().find("TrackScore") != pfpMetadata[0]->GetPropertiesMap().end()))
-        m_trackShowerScore.push_back(pfpMetadata[0]->GetPropertiesMap().at("TrackScore"));
+        m_trackShowerScore.at(pfpVectorIndex) = pfpMetadata[0]->GetPropertiesMap().at("TrackScore");
 
     ////////////////////////
     // Parent Separation
@@ -1000,7 +1117,10 @@ void pandora::VisualiseSlice::FillPFPMiscInfo(art::Event const& evt, const art::
                     const double thisSep((dX * dX) + (dY * dY) + (dZ * dZ));
 
                     if (thisSep < closestDistanceSq)
+                    {
                         closestDistanceSq = thisSep;
+                        m_trackParentSeparation.at(pfpVectorIndex) = std::sqrt(closestDistanceSq);
+                    }
                 }
             }
         }
@@ -1009,7 +1129,8 @@ void pandora::VisualiseSlice::FillPFPMiscInfo(art::Event const& evt, const art::
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-void pandora::VisualiseSlice::FillPFPShowerInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp)
+void pandora::VisualiseSlice::FillPFPShowerInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, 
+    const int pfpVectorIndex)
 {
     art::Handle<std::vector<recob::PFParticle>> pfpHandle;
 
@@ -1022,13 +1143,14 @@ void pandora::VisualiseSlice::FillPFPShowerInfo(art::Event const& evt, const art
     if (shower.empty())
         return;
 
-    m_showerOpeningAngle.push_back(shower.at(0)->OpenAngle() * 180.0 / 3.14);
-    m_showerLength.push_back(shower.at(0)->Length());
+    m_showerOpeningAngle.at(pfpVectorIndex) = shower.at(0)->OpenAngle() * 180.0 / 3.14;
+    m_showerLength.at(pfpVectorIndex) = shower.at(0)->Length();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-void pandora::VisualiseSlice::FillPFPEnergyInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp)
+void pandora::VisualiseSlice::FillPFPEnergyInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp, 
+    const int pfpVectorIndex)
 {
     art::Handle<std::vector<recob::PFParticle>> pfpHandle;
 
@@ -1105,10 +1227,10 @@ void pandora::VisualiseSlice::FillPFPEnergyInfo(art::Event const& evt, const art
             initialSegmentdEdx.push_back(calibrated_dEdX[i]);
     }
 
-    m_initialdEdx.push_back(GetMedianValue(initialSegmentdEdx));
+    m_initialdEdx.at(pfpVectorIndex) = GetMedianValue(initialSegmentdEdx);
 
     // SUM THE ENERGY OF THE HITS!!!!! - I have no idea how uboone do this..
-    m_totalEnergy.push_back(trackCalo.at(index)->KineticEnergy());
+    m_totalEnergy.at(pfpVectorIndex) = trackCalo.at(index)->KineticEnergy();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1134,7 +1256,8 @@ double pandora::VisualiseSlice::GetMedianValue(const std::vector<float> &inputVe
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-void pandora::VisualiseSlice::FillPIDInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp)
+void pandora::VisualiseSlice::FillPIDInfo(art::Event const& evt, const art::Ptr<recob::PFParticle> &pfp,
+    const int pfpVectorIndex)
 {
     art::Handle<std::vector<recob::PFParticle>> pfpHandle;
 
@@ -1165,17 +1288,17 @@ void pandora::VisualiseSlice::FillPIDInfo(art::Event const& evt, const art::Ptr<
     const art::Ptr<anab::ParticleID> &pid = pids.at(0);
 
     // Look at the chi2 PID for induction plane
-    m_chiPIDProton.push_back(searchingfornues::PID(pid, "Chi2", anab::kGOF, anab::kForward, 2212, 2));
-    m_chiPIDMuon.push_back(searchingfornues::PID(pid, "Chi2", anab::kGOF, anab::kForward, 13, 2));
-    m_chiPIDPion.push_back(searchingfornues::PID(pid, "Chi2", anab::kGOF, anab::kForward, 211, 2));
+    m_chiPIDProton.at(pfpVectorIndex) = searchingfornues::PID(pid, "Chi2", anab::kGOF, anab::kForward, 2212, 2);
+    m_chiPIDMuon.at(pfpVectorIndex) = searchingfornues::PID(pid, "Chi2", anab::kGOF, anab::kForward, 13, 2);
+    m_chiPIDPion.at(pfpVectorIndex) = searchingfornues::PID(pid, "Chi2", anab::kGOF, anab::kForward, 211, 2);
 
     // Look at Bragg peak for induction plane
-    m_braggPIDProton.push_back(std::max(searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kForward, 2212, 2),
-                                        searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kBackward, 2212, 2)));
-    m_braggPIDMuon.push_back(std::max(searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kForward, 13, 2),
-                                      searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kBackward, 13, 2)));
-    m_braggPIDPion.push_back(std::max(searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kForward, 211, 2),
-                                      searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kBackward, 211, 2)));
+    m_braggPIDProton.at(pfpVectorIndex) = std::max(searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kForward, 2212, 2),
+                                                   searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kBackward, 2212, 2));
+    m_braggPIDMuon.at(pfpVectorIndex) = std::max(searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kForward, 13, 2),
+                                                 searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kBackward, 13, 2));
+    m_braggPIDPion.at(pfpVectorIndex) = std::max(searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kForward, 211, 2),
+                                                 searchingfornues::PID(pid, "BraggPeakLLH", anab::kLikelihood, anab::kBackward, 211, 2));
 
     // PID LLR calculator
     art::FindManyP<anab::Calorimetry> caloAssoc = art::FindManyP<anab::Calorimetry>(trackHandle, evt, m_CalorimetryModuleLabel);
@@ -1208,38 +1331,7 @@ void pandora::VisualiseSlice::FillPIDInfo(art::Event const& evt, const art::Ptr<
         LLRPID += thisLLRPID;
     }
 
-    m_LLRPIDReduced.push_back(atan(LLRPID / 100.f) * 2.f / 3.14159266);
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////
-
-void pandora::VisualiseSlice::PadPfoVectors(const unsigned int pfoCount)
-{
-    std::vector<std::vector<double>*> doubleVectors = {&m_completeness, &m_purity, &m_trackShowerScore, &m_nuVertexSeparation, 
-        &m_dca, &m_trackParentSeparation, &m_showerOpeningAngle, &m_showerLength, &m_totalEnergy, &m_initialdEdx, 
-        &m_chiPIDProton, &m_chiPIDMuon, &m_chiPIDPion, &m_braggPIDProton, &m_braggPIDMuon, &m_braggPIDPion, &m_LLRPIDReduced};
-
-    for (std::vector<double> *doubleVector : doubleVectors)
-    {
-        if (doubleVector->size() != pfoCount)
-            doubleVector->push_back(DEFAULT_DOUBLE);
-    }
-
-    std::vector<std::vector<int>*> intVectors = {&m_truePDG, &m_generation, &m_pandoraPFPCode, &m_nHits2D, &m_nHits3D, &m_nHitsU, &m_nHitsV, &m_nHitsW};
-
-    for (std::vector<int> *intVector : intVectors)
-    {
-        if (intVector->size() != pfoCount)
-            intVector->push_back(DEFAULT_INT);
-    }
-
-    std::vector<std::vector<std::vector<double>>*> spacePointVectors = {&m_spacePointsX, &m_spacePointsY, &m_spacePointsZ};
-
-    for (std::vector<std::vector<double>> *spacePointVectors : spacePointVectors)
-    {
-        if (spacePointVectors->size() != pfoCount)
-            spacePointVectors->push_back(std::vector<double>());
-    }
+    m_LLRPIDReduced.at(pfpVectorIndex) = atan(LLRPID / 100.f) * 2.f / 3.14159266;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
